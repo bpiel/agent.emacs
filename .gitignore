@@ -1,0 +1,16 @@
+elpa
+backups
+auto-save-list
+tmp
+ac-comphist.dat
+places
+recentf
+ido.last
+smex-items
+locatedbs
+fzf-index
+elpa/archives
+elpa/**/libvterm
+.lsp-session*
+.cache
+eln-cache
