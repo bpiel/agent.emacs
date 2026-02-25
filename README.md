@@ -1,6 +1,6 @@
 # Agent Emacs
 
-Minimal, fast Emacs configuration for editing alongside Claude Code.
+Minimal, fast Emacs configuration for use as an interface to Claude Code.
 
 ## Launch
 
