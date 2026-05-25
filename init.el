@@ -36,6 +36,62 @@ Use 'reset-window-title' to restore the default format."
   (force-mode-line-update t)
   (message "Window title reset to default"))
 
+;;; Quick Notes Buffer - Toggle-able scratch for temporary notes
+(defvar quick-notes-buffer-name "*quick-notes*"
+  "Name of the quick notes buffer.")
+
+(defvar quick-notes-window-config nil
+  "Window configuration before quick notes buffer was shown.")
+
+(defvar quick-notes-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "M-S-SPC") 'quick-notes-toggle)
+    (define-key map (kbd "C-c '") 'quick-notes-toggle)
+    (define-key map (kbd "C-c q") 'quick-notes-hide)
+    map)
+  "Keymap for quick-notes buffers.")
+
+(define-minor-mode quick-notes-mode
+  "Minor mode for quick notes buffer."
+  :init-value nil
+  :lighter nil
+  :keymap quick-notes-mode-map)
+
+(defun quick-notes-toggle ()
+  "Toggle a small quick notes buffer at the bottom of the frame.
+If the buffer is already shown in a window, restore the previous window
+configuration. If not, save current config and show the buffer."
+  (interactive)
+  (let ((buf (get-buffer-create quick-notes-buffer-name)))
+    (if (get-buffer-window buf)
+        ;; Buffer is visible - hide it and restore layout
+        (when quick-notes-window-config
+          (set-window-configuration quick-notes-window-config)
+          (setq quick-notes-window-config nil))
+      ;; Buffer not visible - show it
+      (setq quick-notes-window-config (current-window-configuration))
+      (pop-to-buffer buf
+                   '((display-buffer-at-bottom)
+                     (window-height . 10)
+                     (dedicated . t)))
+      (text-mode)
+      (quick-notes-mode 1)
+      (setq-local truncate-lines t)
+      (setq-local fill-column 80)
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (message "Quick notes buffer shown (M-S-SPC or C-c ' to toggle)"))))
+
+(defun quick-notes-hide ()
+  "Hide the quick notes buffer and restore previous window configuration."
+  (interactive)
+  (let ((buf (get-buffer quick-notes-buffer-name)))
+    (if (and buf (get-buffer-window buf) quick-notes-window-config)
+        (progn
+          (set-window-configuration quick-notes-window-config)
+          (setq quick-notes-window-config nil))
+      (message "Quick notes buffer not visible"))))
+
 ;; Clean modeline
 (column-number-mode 1)
 (size-indication-mode 1)
@@ -160,10 +216,16 @@ Use 'reset-window-title' to restore the default format."
 (global-set-key (kbd "C-c j") 'avy-goto-char-timer) ;; Jump with timer
 (global-set-key (kbd "M-g l") 'avy-goto-line)      ;; Jump to line
 (global-set-key (kbd "M-g w") 'avy-goto-word-1)    ;; Jump to word
+(global-set-key (kbd "M-S-o") 'avy-goto-char)      ;; Jump to single char (Shift-Alt-o)
 
 ;; Window title management
-(global-set-key (kbd "C-c w") 'set-window-title)
+(global-set-key (kbd "M-S-w") 'set-window-title)    ;; Shift-Alt-w
 (global-set-key (kbd "C-c W") 'reset-window-title)  ;; Capital W for reset
+
+;; Quick notes toggle (easy to hit, mnemonic: ' = quote/notes)
+(global-set-key (kbd "C-c '") 'quick-notes-toggle)
+(global-set-key (kbd "C-c q") 'quick-notes-hide)  ;; Alternative hide key
+(global-set-key (kbd "M-S-SPC") 'quick-notes-toggle)  ;; Shift-Alt-Space toggle
 
 ;;; Completion (built-in, fast)
 ;; Use fido-mode for lightweight completion (better than ido, lighter than ivy/helm)
@@ -276,31 +338,63 @@ Use 'reset-window-title' to restore the default format."
 
 ;; Vterm Copy Mode - for scrolling and searching the terminal
 ;; Enter copy mode with C-c C-t, then use normal Emacs navigation
+
 (defun vterm-copy-mode-enter-with-message ()
   "Enter vterm copy mode with helpful message."
   (interactive)
   (when (eq major-mode 'vterm-mode)
     (vterm-copy-mode 1)
-    (message "Copy mode ON - Navigate with C-n/C-p/C-s, press RET to copy region, C-c C-t to exit")))
+    (message "Copy mode ON - Select text then M-w to copy to system clipboard | C-c C-t or q to exit")))
 
-;; Make copy mode more discoverable
+(defun my-vterm-copy-to-clipboard ()
+  "Copy selected region to kill ring AND system clipboard, then exit copy mode.
+This is the missing link: vterm copy mode normally only copies to the kill
+ring, not to the X11/system clipboard that other apps can paste from."
+  (interactive)
+  (if (use-region-p)
+      (let ((text (buffer-substring-no-properties (region-beginning) (region-end))))
+        (kill-new text)
+        (when (display-graphic-p)
+          (gui-select-text text))
+        (vterm-copy-mode -1)
+        (message "Copied %d chars to clipboard" (length text)))
+    (message "No region selected - use C-SPC to set mark first")))
+
+(defun my-vterm-paste-from-clipboard ()
+  "Paste system clipboard content into vterm (not just Emacs kill ring).
+Use this when you've copied text from another app and want to paste into Claude."
+  (interactive)
+  (let ((text (if (display-graphic-p)
+                  (gui-get-selection 'CLIPBOARD)
+                (current-kill 0 t))))
+    (if text
+        (vterm-send-string text)
+      (message "Clipboard is empty"))))
+
 (with-eval-after-load 'vterm
   ;; Enable scrollback
   (setq vterm-max-scrollback 10000)
 
   ;; Better copy mode keybindings
+  ;; C-c C-t for copy mode (since M-S-c doesn't pass through terminal)
   (define-key vterm-mode-map (kbd "C-c C-t") 'vterm-copy-mode-enter-with-message)
-  (define-key vterm-mode-map (kbd "C-c C-y") 'vterm-copy-mode-enter-with-message)
 
-  ;; In copy mode, add helpful bindings
-  (define-key vterm-copy-mode-map (kbd "C-c C-t") 'vterm-copy-mode)
+  ;; Window title management in vterm (C-c w since M-S-w doesn't work)
+  (define-key vterm-mode-map (kbd "C-c w") 'set-window-title)
+
+  ;; Quick notes in vterm (C-c ' works since it's a global binding)
+  ;; Avy navigation - use C-' or enter copy mode first
+
+  ;; In copy mode: M-w copies to system clipboard (not just kill ring)
+  (define-key vterm-copy-mode-map (kbd "M-w") 'my-vterm-copy-to-clipboard)
+  (define-key vterm-copy-mode-map (kbd "M-S-c") 'vterm-copy-mode)
   (define-key vterm-copy-mode-map (kbd "q") 'vterm-copy-mode)
 
   ;; Make search work better in copy mode
   (define-key vterm-copy-mode-map (kbd "C-s") 'isearch-forward)
   (define-key vterm-copy-mode-map (kbd "C-r") 'isearch-backward)
 
-  ;; Vim-style navigation in copy mode (optional)
+  ;; Vim-style navigation in copy mode
   (define-key vterm-copy-mode-map (kbd "j") 'next-line)
   (define-key vterm-copy-mode-map (kbd "k") 'previous-line)
   (define-key vterm-copy-mode-map (kbd "h") 'backward-char)
@@ -395,6 +489,76 @@ Use 'reset-window-title' to restore the default format."
 
 ;; Toggle skip-permissions flag
 (global-set-key (kbd "C-c p") 'claude-code-toggle-skip-permissions)
+
+;;; File Path Search - System-wide file finder using locate/rg/find
+;;
+;; Three strategies, fastest first:
+;; 1. plocate - Uses pre-built system database (~10ms, system-wide)
+;; 2. rg --files - Fast for projects with .git (~50-200ms)
+;; 3. find - Fallback for any directory (~100ms-1s depending on size)
+
+(defun claude-code--send-to-claude (text)
+  "Send TEXT to Claude Code vterm buffer or clipboard."
+  (let ((claude-buf (get-buffer "*claude*")))
+    (if (and claude-buf (buffer-live-p claude-buf))
+        (progn
+          (with-current-buffer claude-buf
+            (vterm-send-string text))
+          (message "Sent to Claude: %s" text))
+      (kill-new text)
+      (when (display-graphic-p)
+        (gui-select-text text))
+      (message "Copied to clipboard: %s" text))))
+
+(defun claude-code-locate-file (query)
+  "Find files system-wide using locate (plocate).
+Searches pre-built database - instant results across entire filesystem."
+  (interactive "sLocate query (system-wide): ")
+  (let* ((results (process-lines "locate" "-i" "-l" "1000" query))
+         (choice (completing-read (format "Found %d matches: " (length results))
+                                  results nil t)))
+    (when choice
+      (claude-code--send-to-claude choice))))
+
+(defun claude-code-find-project-file (search-root)
+  "Find files under SEARCH-ROOT using ripgrep or find.
+Best for project directories (respects .gitignore with rg)."
+  (interactive
+   (list (read-directory-name "Search in: "
+                              (or (when (project-current t)
+                                    (project-root (project-current t)))
+                                  default-directory
+                                  (expand-file-name "~/")))))
+  (let* ((default-directory (file-name-as-directory (expand-file-name search-root)))
+         (files (if (executable-find "rg")
+                    (process-lines "rg" "--files" "--hidden" "-g" "!.git/" "-g" "!.git")
+                  (process-lines "find" "." "-type" "f" "-not" "-path" "./.git/*" "-not" "-path" "./.git")))
+         (files (mapcar (lambda (f) (string-remove-prefix "./" f)) files))
+         (choice (completing-read (format "Found %d files in %s: "
+                                          (length files)
+                                          (abbreviate-file-name default-directory))
+                                  files nil t)))
+    (when choice
+      (claude-code--send-to-claude (expand-file-name choice default-directory)))))
+
+(defun claude-code-find-any-file (path-pattern)
+  "Find files by path pattern using locate with wildcards.
+Example: '*.clj' finds all Clojure files system-wide."
+  (interactive "sFile pattern (e.g., *.clj, *config*): ")
+  (let* ((pattern (if (string-prefix-p "*" path-pattern)
+                      path-pattern
+                    (concat "*" path-pattern "*")))
+         (results (process-lines "locate" "-i" "-l" "500" pattern))
+         (choice (completing-read (format "Found %d matches for '%s': "
+                                          (length results) pattern)
+                                  results nil t)))
+    (when choice
+      (claude-code--send-to-claude choice))))
+
+;; Keybindings - file search
+(global-set-key (kbd "C-c f") 'claude-code-locate-file)      ;; f = fast system-wide (locate)
+(global-set-key (kbd "C-c C-f") 'claude-code-find-project-file) ;; C-f = project local
+(global-set-key (kbd "C-c M-f") 'claude-code-find-any-file)  ;; M-f = pattern search
 
 ;; Verify keybindings were set
 (message "C-c c bound to: %s" (key-binding (kbd "C-c c")))
