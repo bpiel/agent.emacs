@@ -98,11 +98,18 @@ Edit `~/.agent.emacs.d/init.el` directly. Everything is commented and organized 
 
 When Claude Code is running in vterm:
 
-**Copy/paste:**
-- `C-c C-t` - Toggle between vterm mode and normal Emacs mode
-- In Emacs mode: use normal `C-SPC`, `M-w`, `C-y` for mark/copy/paste
-- In vterm mode: keys go directly to Claude Code
-- Mouse selection works in both modes
+**Copy from Claude → system clipboard:**
+- `C-c C-t` - Enter copy mode
+- `C-SPC` to set mark, navigate to end of selection
+- `M-w` - Copy to system clipboard (other apps can now paste it)
+- Copy mode exits automatically
+
+**Paste from system clipboard → Claude:**
+- `C-c C-y` or `C-S-v` - Paste system clipboard into vterm
+  (use this for text copied from browser, another terminal, etc.)
+
+**Shift+drag (GUI only):** Hold Shift and mouse-drag to select text directly via
+X11 — bypasses vterm entirely, goes straight to PRIMARY selection.
 
 **Navigation:**
 - Scroll with mouse wheel or `Shift-PgUp`/`Shift-PgDn`
